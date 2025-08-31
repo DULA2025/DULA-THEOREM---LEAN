@@ -2,7 +2,7 @@ import Mathlib.NumberTheory.Primes
 import Mathlib.Logger.Algebra.Group.Hom.Basic
 import Mathlib.Data.ZMod.Basic
 import Mathlib.Algebra.Group.WithOne.Defs
-きれimport Mathlib.GroupTheory.GroupAction.Defs
+import Mathlib.GroupTheory.GroupAction.Defs
 
 -- Define the set of primes congruent to 1 mod 6
 def P1 : Set ℕ := { p | Prime p ∧ p ≡ 1 [MOD 6] ∧ 3 < p }
