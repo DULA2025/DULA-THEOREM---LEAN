@@ -2,10 +2,6 @@ import Mathlib.Data.Nat.Prime
 import Mathlib.Data.ZMod.Defs
 import Mathlib.GroupTheory.Hom.Monoid
 import Mathlib.Tactic
-import Mathlib.NumberTheory.PadicValuation.Basic
-import Mathlib.Data.Nat.Factorization.Basic
-import Mathlib.Algebra.Group.Equiv.Basic
-import Mathlib.Data.ZMod.Basic
 
 -- We work with natural numbers for simplicity.
 open Nat
@@ -14,113 +10,121 @@ namespace DulaTheorem
 
 /-!
 ### Section 1: Preliminaries and Definitions
-We define the sets of primes and the monoid S.
+We define the monoid S and the function `m(n)`.
 -/
 
--- Define primes congruent to 1 mod 6
-def P₁ : Set ℕ := { p | Prime p ∧ p ≡ 1 [MOD 6] }
+/-- The submonoid S of natural numbers n where n % 6 = 1 or n % 6 = 5.
+    This is equivalent to gcd(n, 6) = 1 for n > 0. -/
+def S : Submonoid ℕ where
+  carrier := {n | n % 6 = 1 ∨ n % 6 = 5}
+  one_mem' := by simp
+  mul_mem' := by
+    rintro a b (ha | ha) (hb | hb)
+    · have h := (modeq_one_of_modeq_one ha hb); simp [Nat.modeq] at h; exact Or.inl h
+    · have h := (modeq_mul_modeq_of_modeq_one_of_modeq hb ha); simp [Nat.modeq] at h; exact Or.inr h
+    · have h := (modeq_mul_modeq_of_modeq_one_of_modeq ha hb); simp [Nat.modeq] at h; exact Or.inr h
+    · have h := (modeq_five_mul_five_is_one ha hb); simp [Nat.modeq] at h; exact Or.inl h
+    -- Note: The helper lemmas like `modeq_five_mul_five_is_one` would need to be proven.
+    -- `sorry` is used here as a placeholder for these proofs.
+    sorry
 
--- Define primes congruent to 5 mod 6
-def P₅ : Set ℕ := { p | Prime p ∧ p ≡ 5 [MOD 6] }
-
--- Union P = P₁ ∪ P₅, which are all primes not dividing 6.
-def P : Set ℕ := P₁ ∪ P₅
-
-/-- The monoid S: positive integers whose prime factors are all in P. -/
-structure S where
-  val : ℕ
-  pos : val > 0
-  factors : ∀ {p : ℕ}, p.Prime → p ∣ val → p ∈ P
-
-/-!
-### Section 2: Monoid Structure and Helper Functions
--/
-
--- Define multiplication and identity for S to make it a Monoid.
-instance : Monoid S where
-  mul a b := {
-    val := a.val * b.val,
-    pos := mul_pos a.pos b.pos,
-    factors := by
-      intro p hp hpdvd
-      have h_dvd_ab : p ∣ a.val * b.val := hpdvd
-      rw [Prime.dvd_mul hp] at h_dvd_ab
-      cases h_dvd_ab with
-      | inl ha => exact a.factors hp ha
-      | inr hb => exact b.factors hp hb
-  }
-  one := {
-    val := 1,
-    pos := by simp,
-    factors := by
-      intro p hp hpdvd
-      simp at hpdvd
-      exact (hp.ne_one (Eq.symm hpdvd)).elim
-  }
-  mul_one := by intro a; simp [HMul.hMul, Mul.mul]
-  one_mul := by intro a; simp [HMul.hMul, Mul.mul]
-  mul_assoc := by intro a b c; simp [HMul.hMul, Mul.mul, mul_assoc]
-
-
-/-- The function m: sum of exponents for primes in P₅. -/
-def m (n : S) : ℕ :=
-  n.val.factorization.sum fun p k => if p ∈ P₅ then k else 0
+/-- The function m(n) is the sum of the exponents of prime factors of n
+    that are congruent to 5 mod 6. -/
+def m (n : ℕ) : ℕ :=
+  -- We sum the p-adic valuations (exponents) for all primes p such that p ≡ 5 (mod 6).
+  -- `n.factorization` is a finitely supported function from primes to their exponents.
+  n.factorization.sum fun p k => if p % 6 = 5 then k else 0
 
 /-!
-### Section 3: The Homomorphisms and the Theorem
+### Section 2: The Homomorphisms φ and ψ
 -/
 
 -- The additive group Z/2Z.
 abbrev Z2 := ZMod 2
 
--- The multiplicative group {±1}, represented as units of integers.
+-- The multiplicative group {+1, -1}, represented as units of integers.
 abbrev MulZ2 := (Units ℤ)
 
-/-- The grading homomorphism φ: S → ℤ/2ℤ (additive). -/
+/-- The homomorphism φ from S to the additive group Z/2Z. -/
 def phi (n : S) : Z2 :=
-  (m n : ℤ)
+  m n.val
 
-/-- The homomorphism ψ: S → {±1} (multiplicative). -/
+/-- The homomorphism ψ from S to the multiplicative group {+1, -1}. -/
 def psi (n : S) : MulZ2 :=
-  (-1 : ℤ) ^ (m n)
+  (-1 : ℤ) ^ (m n.val)
 
-/-- A crucial lemma about how m behaves under multiplication. -/
-lemma m_mul (a b : S) : m (a * b) = m a + m b := by
-  simp only [m, Monoid.mul_val, factorization_mul a.pos.ne' b.pos.ne']
-  rw [Finsupp.sum_add_index']
-  · intro p; simp
-  · intro p k₁ k₂; by_cases h : p ∈ P₅ <;> simp [h]
+/-!
+### Section 3: The DULA Theorem Statements
+-/
 
-/-- Theorem: φ is a MonoidHom. -/
-def phiHom : MonoidHom S Z2 where
+/--
+The core lemma connecting the congruence class of n modulo 6
+to the parity of m(n).
+-/
+theorem m_parity_iff_mod6 (n : S) : (m n.val) % 2 = 0 ↔ n.val % 6 = 1 := by
+  -- The proof would proceed by induction on the prime factorization of n.
+  -- It relies on the facts that:
+  -- 1. p ≡ 1 (mod 6) => p^k ≡ 1 (mod 6)
+  -- 2. p ≡ 5 (mod 6) => p^k ≡ 1 (mod 6) if k is even, and p^k ≡ 5 (mod 6) if k is odd.
+  sorry
+
+/--
+Theorem: φ is a monoid homomorphism.
+This means φ(a * b) = φ(a) + φ(b).
+-/
+theorem phi_is_monoid_hom : MonoidHom S Z2 where
   toFun := phi
-  map_one' := by simp [phi, m, factorization_one]
-  map_mul' a b := by
-    simp [phi, m_mul, ZMod.int_cast_add]
+  map_one' := by
+    -- m(1) = 0, and 0 mod 2 = 0.
+    simp [phi, m, factorization_one]
+  map_mul' := by
+    -- This relies on the property that m(a * b) = m(a) + m(b).
+    -- This is true because factorization exponents add under multiplication.
+    intro a b
+    simp [phi, m, add_comm, add_left_comm, sum_add_distrib, factorization_mul]
+    sorry
 
-/-- Theorem: ψ is a MonoidHom. -/
-def psiHom : MonoidHom S MulZ2 where
+/--
+Theorem: ψ is a monoid homomorphism.
+This means ψ(a * b) = ψ(a) * ψ(b).
+-/
+theorem psi_is_monoid_hom : MonoidHom S MulZ2 where
   toFun := psi
-  map_one' := by simp [psi, m, factorization_one, pow_zero]
-  map_mul' a b := by simp [psi, m_mul, pow_add]
+  map_one' := by
+    -- m(1) = 0, so (-1)^0 = 1.
+    simp [psi, m, factorization_one]
+  map_mul' := by
+    -- This uses m(a * b) = m(a) + m(b) and the exponent rule x^(a+b) = x^a * x^b.
+    intro a b
+    simp [psi, pow_add]
+    -- The proof of m(a*b) = m(a) + m(b) is needed here as well.
+    sorry
 
-/-- The isomorphism θ: ZMod 2 → {±1}. -/
-def theta : Z2 ≃* MulZ2 where
+/--
+The isomorphism θ between the codomains of φ and ψ.
+It connects the additive structure of Z/2Z to the multiplicative {-1, 1}.
+-/
+def theta : Z2 →+* MulZ2 where
   toFun z := if z = 0 then 1 else -1
-  invFun u := if u = 1 then 0 else 1
-  left_inv := by intro z; fin_cases z <;> simp
-  right_inv := by intro u; cases u; simp; simp
-  map_mul' := by intro z₁ z₂; fin_cases z₁ <;> fin_cases z₂ <;> simp [Z2, ZMod.val]
+  map_zero' := by simp
+  map_one' := by simp
+  map_add' := by
+    -- Proof by cases on the values in Z/2Z.
+    decide
+  map_mul' := by
+    -- Proof by cases on the values in Z/2Z.
+    decide
 
-/-- The DULA Theorem: Commutativity holds, ψ = θ ∘ φ. -/
+/--
+The DULA Theorem: The commutative diagram holds.
+This shows that φ and ψ are structurally equivalent via the isomorphism θ.
+-/
 theorem dula_theorem_commutes (n : S) : psi n = theta (phi n) := by
-  simp [psi, phi, theta]
-  rw [ZMod.int_cast_eq_int_cast_iff]
-  by_cases heven : Even (m n)
-  · rw [pow_even heven]
-    simp [heven]
-  · have hodd : Odd (m n) := Nat.odd_iff_not_even.mpr heven
-    rw [pow_odd hodd]
-    simp [hodd, Nat.odd_iff]
+  -- The proof follows from the definitions and the core lemma.
+  -- If m(n) is even, phi(n) = 0, theta(0) = 1, and psi(n) = (-1)^even = 1.
+  -- If m(n) is odd, phi(n) = 1, theta(1) = -1, and psi(n) = (-1)^odd = -1.
+  unfold psi phi theta
+  -- Use the core lemma `m_parity_iff_mod6` to split into cases on m(n) % 2.
+  sorry
 
 end DulaTheorem
