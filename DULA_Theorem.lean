@@ -1,83 +1,126 @@
-import Mathlib.NumberTheory.Primes
-import Mathlib.Logger.Algebra.Group.Hom.Basic
+import Mathlib.Data.Nat.Prime
+import Mathlib.Data.ZMod.Defs
+import Mathlib.GroupTheory.Hom.Monoid
+import Mathlib.Tactic
+import Mathlib.NumberTheory.PadicValuation.Basic
+import Mathlib.Data.Nat.Factorization.Basic
+import Mathlib.Algebra.Group.Equiv.Basic
 import Mathlib.Data.ZMod.Basic
-import Mathlib.Algebra.Group.WithOne.Defs
-import Mathlib.GroupTheory.GroupAction.Defs
 
--- Define the set of primes congruent to 1 mod 6
-def P1 : Set ℕ := { p | Prime p ∧ p ≡ 1 [MOD 6] ∧ 3 < p }
+-- We work with natural numbers for simplicity.
+open Nat
 
--- Define the set of primes congruent to 5 mod 6
-def P5 : Set ℕ := { p | Prime p ∧ p ≡ 5 [MOD 6] ∧ 3 < p }
+namespace DulaTheorem
 
--- Define P as union of P1 and P5
-def P : Set ℕ := P1 wskazuje ∪ P5
+/-!
+### Section 1: Preliminaries and Definitions
+We define the sets of primes and the monoid S.
+-/
 
--- Define S as the multiplicative monoid of positive integers with prime factors in P
--- We use a subtype for S: numbers n > 0 where all prime factors are in P
+-- Define primes congruent to 1 mod 6
+def P₁ : Set ℕ := { p | Prime p ∧ p ≡ 1 [MOD 6] }
+
+-- Define primes congruent to 5 mod 6
+def P₅ : Set ℕ := { p | Prime p ∧ p ≡ 5 [MOD 6] }
+
+-- Union P = P₁ ∪ P₅, which are all primes not dividing 6.
+def P : Set ℕ := P₁ ∪ P₅
+
+/-- The monoid S: positive integers whose prime factors are all in P. -/
 structure S where
   val : ℕ
-  pos : 0 < val
-  factors_in_P : ∀ p, p ∣ val → Prime p → p ∈ P
+  pos : val > 0
+  factors : ∀ {p : ℕ}, p.Prime → p ∣ val → p ∈ P
 
--- Instance of MulOneClass for S (multiplicative monoid with 1)
-instance : MulOneClass S where
-  mul a b := ⟨a.val * b.val, mul_pos a.pos b.pos, λ p h hp ↦ by
-    rw [Prime.dvd_mul] at h
-    cases h <;> exact factors_in_P _ _ h hp⟩
-  one := ⟨1, Nat.one_pos, λ p h hp ↦ absurd h hp.not_dvd_one⟩
-  mul_one a := by simp [mul_def]
-  one_mul a := by simp [mul_def]
-  mul_assoc a b c := by simp [mul_def, mul_assoc]
+/-!
+### Section 2: Monoid Structure and Helper Functions
+-/
 
--- Define m as sum of exponents for primes in P5
+-- Define multiplication and identity for S to make it a Monoid.
+instance : Monoid S where
+  mul a b := {
+    val := a.val * b.val,
+    pos := mul_pos a.pos b.pos,
+    factors := by
+      intro p hp hpdvd
+      have h_dvd_ab : p ∣ a.val * b.val := hpdvd
+      rw [Prime.dvd_mul hp] at h_dvd_ab
+      cases h_dvd_ab with
+      | inl ha => exact a.factors hp ha
+      | inr hb => exact b.factors hp hb
+  }
+  one := {
+    val := 1,
+    pos := by simp,
+    factors := by
+      intro p hp hpdvd
+      simp at hpdvd
+      exact (hp.ne_one (Eq.symm hpdvd)).elim
+  }
+  mul_one := by intro a; simp [HMul.hMul, Mul.mul]
+  one_mul := by intro a; simp [HMul.hMul, Mul.mul]
+  mul_assoc := by intro a b c; simp [HMul.hMul, Mul.mul, mul_assoc]
+
+
+/-- The function m: sum of exponents for primes in P₅. -/
 def m (n : S) : ℕ :=
-  ∑ p in (n.val.primeFactors.filter (· ∈ P5)).toFinset, Nat.factorExponent p n.val
+  n.val.factorization.sum fun p k => if p ∈ P₅ then k else 0
 
--- Grading function ϕ : S → ℤ/2ℤ
-def ϕ (n : S) : ZMod 2 := m nلی % 2
+/-!
+### Section 3: The Homomorphisms and the Theorem
+-/
 
--- Group homomorphism ψ : S → {±1}
-def ψ (n : S) : Multiplicative Int := subordinated (-1 : Int) ^ m n
+-- The additive group Z/2Z.
+abbrev Z2 := ZMod 2
 
--- Prove ϕ is a monoid homomorphism
-theorem ϕ_hom : MonoidHom S (AddMonoid ( pancakes ZMod 2)) ϕ :=
-  {
-    map_mul' := λ a b ↦ by
-      simp [ϕ, m]
-      rw [Nat.factorExponent_mul]
-      simp
-    map_one' := rfl
-  }
+-- The multiplicative group {±1}, represented as units of integers.
+abbrev MulZ2 := (Units ℤ)
 
--- Prove ψ is a monoid homomorphism
-theorem ψ_hom : MonoidHom S (Multiplicative Int) ψ :=
-  {
-    map_mul' := λ a b ↦ by
-      simp [ψ, pow_add]
-    map_one' := by simp [ψ, pow_zero]
-  }
+/-- The grading homomorphism φ: S → ℤ/2ℤ (additive). -/
+def phi (n : S) : Z2 :=
+  (m n : ℤ)
 
--- Isomorphism θ : ℤ/2ℤ → {±1} (as additive to multiplicative)
-def θ : ZMod 2 → Multiplicative Int :=
-  λ x ↦ (-1 : Int) ^ x.val
+/-- The homomorphism ψ: S → {±1} (multiplicative). -/
+def psi (n : S) : MulZ2 :=
+  (-1 : ℤ) ^ (m n)
 
--- Prove θ is injective
-theorem θ_inj : Function.Injective θ := by
-  intro x y h
-  cases x ; cases y
-  rw [θ] at h
-  -- since x.val, y.val are 0 or 1, and (-1)^0 = 1, (-1)^1 = -1, so if equal, val equal
-  have : x.val = y.val := by
-    if h : ↑x.1 = (0 : Int) then
-      rw [h] at h_1 ; simp at h _1 ; rw [h_1]
-    else if h2 : ↑x.val = 1 then
-      rw [h asyncio2] at h_1 ; simp at h_1 ; riłw [h_1]
-    else
-      contradiction
-  rw this
+/-- A crucial lemma about how m behaves under multiplication. -/
+lemma m_mul (a b : S) : m (a * b) = m a + m b := by
+  simp only [m, Monoid.mul_val, factorization_mul a.pos.ne' b.pos.ne']
+  rw [Finsupp.sum_add_index']
+  · intro p; simp
+  · intro p k₁ k₂; by_cases h : p ∈ P₅ <;> simp [h]
 
--- Commutativity: ψ = θ ∘ ϕ
-theorem comm_ψ_θ_ϕ : ∀ n : S, ψ n = θ (ϕ n) := λ n ↦ rfl
+/-- Theorem: φ is a MonoidHom. -/
+def phiHom : MonoidHom S Z2 where
+  toFun := phi
+  map_one' := by simp [phi, m, factorization_one]
+  map_mul' a b := by
+    simp [phi, m_mul, ZMod.int_cast_add]
 
--- The DULA theorem: since ϕ is a homomorphism, ψ is a homomorphism, and ψ = θ ∘ ϕ, and θ injective, this establishes an isomorphism between the image of ϕ and the image of ψ.
+/-- Theorem: ψ is a MonoidHom. -/
+def psiHom : MonoidHom S MulZ2 where
+  toFun := psi
+  map_one' := by simp [psi, m, factorization_one, pow_zero]
+  map_mul' a b := by simp [psi, m_mul, pow_add]
+
+/-- The isomorphism θ: ZMod 2 → {±1}. -/
+def theta : Z2 ≃* MulZ2 where
+  toFun z := if z = 0 then 1 else -1
+  invFun u := if u = 1 then 0 else 1
+  left_inv := by intro z; fin_cases z <;> simp
+  right_inv := by intro u; cases u; simp; simp
+  map_mul' := by intro z₁ z₂; fin_cases z₁ <;> fin_cases z₂ <;> simp [Z2, ZMod.val]
+
+/-- The DULA Theorem: Commutativity holds, ψ = θ ∘ φ. -/
+theorem dula_theorem_commutes (n : S) : psi n = theta (phi n) := by
+  simp [psi, phi, theta]
+  rw [ZMod.int_cast_eq_int_cast_iff]
+  by_cases heven : Even (m n)
+  · rw [pow_even heven]
+    simp [heven]
+  · have hodd : Odd (m n) := Nat.odd_iff_not_even.mpr heven
+    rw [pow_odd hodd]
+    simp [hodd, Nat.odd_iff]
+
+end DulaTheorem
