@@ -1,11 +1,10 @@
 import Mathlib.Data.Nat.Prime
-import Mathlib.Data.ZMod.Defs
+import Mathlib.Data.ZMod.Basic
 import Mathlib.GroupTheory.Hom.Monoid
 import Mathlib.Tactic
 import Mathlib.NumberTheory.PadicValuation.Basic
 import Mathlib.Data.Nat.Factorization.Basic
 import Mathlib.Algebra.Group.Equiv.Basic
-import Mathlib.Data.ZMod.Basic
 
 -- We work with natural numbers for simplicity.
 open Nat
@@ -36,16 +35,23 @@ structure S where
 ### Section 2: Monoid Structure and Helper Functions
 -/
 
+-- Auxiliary definition for -1 as a unit in ℤ
+lemma isUnit_neg_one : IsUnit (-1 : ℤ) := ⟨-1, neg_neg.symm⟩
+
+def negOneUnit : Units ℤ := ⟨-1, isUnit_neg_one⟩
+
 -- Define multiplication and identity for S to make it a Monoid.
+@[simp] lemma val_mul (a b : S) : (a * b).val = a.val * b.val := rfl
+
 instance : Monoid S where
   mul a b := {
     val := a.val * b.val,
     pos := mul_pos a.pos b.pos,
     factors := by
       intro p hp hpdvd
-      have h_dvd_ab : p ∣ a.val * b.val := hpdvd
-      rw [Prime.dvd_mul hp] at h_dvd_ab
-      cases h_dvd_ab with
+      rw [← val_mul] at hpdvd
+      rw [Prime.dvd_mul hp] at hpdvd
+      cases hpdvd with
       | inl ha => exact a.factors hp ha
       | inr hb => exact b.factors hp hb
   }
@@ -57,10 +63,9 @@ instance : Monoid S where
       simp at hpdvd
       exact (hp.ne_one (Eq.symm hpdvd)).elim
   }
-  mul_one := by intro a; simp [HMul.hMul, Mul.mul]
-  one_mul := by intro a; simp [HMul.hMul, Mul.mul]
-  mul_assoc := by intro a b c; simp [HMul.hMul, Mul.mul, mul_assoc]
-
+  mul_one := by intro a; simp [Mul.mul]
+  one_mul := by intro a; simp [Mul.mul]
+  mul_assoc := by intro a b c; simp [Mul.mul, mul_assoc]
 
 /-- The function m: sum of exponents for primes in P₅. -/
 def m (n : S) : ℕ :=
@@ -70,57 +75,78 @@ def m (n : S) : ℕ :=
 ### Section 3: The Homomorphisms and the Theorem
 -/
 
--- The additive group Z/2Z.
-abbrev Z2 := ZMod 2
+-- The additive group ℤ/2ℤ, via the Additive functor.
+abbrev AddZ₂ := Additive (ZMod 2)
 
 -- The multiplicative group {±1}, represented as units of integers.
-abbrev MulZ2 := (Units ℤ)
+abbrev MulZ₂ := Units ℤ
 
 /-- The grading homomorphism φ: S → ℤ/2ℤ (additive). -/
-def phi (n : S) : Z2 :=
-  (m n : ℤ)
+def phi (n : S) : AddZ₂ :=
+  (m n : ZMod 2)
 
 /-- The homomorphism ψ: S → {±1} (multiplicative). -/
-def psi (n : S) : MulZ2 :=
-  (-1 : ℤ) ^ (m n)
+def psi (n : S) : MulZ₂ :=
+  negOneUnit ^ m n
 
 /-- A crucial lemma about how m behaves under multiplication. -/
 lemma m_mul (a b : S) : m (a * b) = m a + m b := by
-  simp only [m, Monoid.mul_val, factorization_mul a.pos.ne' b.pos.ne']
-  rw [Finsupp.sum_add_index']
-  · intro p; simp
-  · intro p k₁ k₂; by_cases h : p ∈ P₅ <;> simp [h]
+  simp only [m, val_mul, factorization_mul a.pos.ne' b.pos.ne']
+  rw [Finsupp.sum_add_index]
+  rfl
 
 /-- Theorem: φ is a MonoidHom. -/
-def phiHom : MonoidHom S Z2 where
+def phiHom : MonoidHom S AddZ₂ where
   toFun := phi
   map_one' := by simp [phi, m, factorization_one]
   map_mul' a b := by
-    simp [phi, m_mul, ZMod.int_cast_add]
+    simp [phi, m_mul, Additive.mul_def, ZMod.int_cast_add]
 
 /-- Theorem: ψ is a MonoidHom. -/
-def psiHom : MonoidHom S MulZ2 where
+def psiHom : MonoidHom S MulZ₂ where
   toFun := psi
   map_one' := by simp [psi, m, factorization_one, pow_zero]
   map_mul' a b := by simp [psi, m_mul, pow_add]
 
-/-- The isomorphism θ: ZMod 2 → {±1}. -/
-def theta : Z2 ≃* MulZ2 where
-  toFun z := if z = 0 then 1 else -1
+/-- The isomorphism θ: ℤ/2ℤ → {±1}. -/
+def theta : AddZ₂ ≃* MulZ₂ where
+  toFun z := if (z : ZMod 2) = 0 then 1 else negOneUnit
   invFun u := if u = 1 then 0 else 1
-  left_inv := by intro z; fin_cases z <;> simp
-  right_inv := by intro u; cases u; simp; simp
-  map_mul' := by intro z₁ z₂; fin_cases z₁ <;> fin_cases z₂ <;> simp [Z2, ZMod.val]
+  left_inv := by
+    intro z
+    simp [theta, Additive.coe_eq_coe]
+    fin_cases (z : ZMod 2)
+    · rfl
+    · rfl
+  right_inv := by
+    intro u
+    simp [theta]
+    by_cases h : u = 1
+    · simp [h]
+    · simp only [dif_neg h, if_neg (by norm_num)]
+      rw [← Units.ext]
+      simp [Int.is_unit_iff.mp u.2, h]
+  map_mul' := by
+    intro x y
+    simp [theta, Additive.mul_def]
+    fin_cases (x : ZMod 2)
+    · fin_cases (y : ZMod 2)
+      · simp
+      · simp
+    · fin_cases (y : ZMod 2)
+      · simp
+      · simp
 
 /-- The DULA Theorem: Commutativity holds, ψ = θ ∘ φ. -/
 theorem dula_theorem_commutes (n : S) : psi n = theta (phi n) := by
-  simp [psi, phi, theta]
-  rw [ZMod.int_cast_eq_int_cast_iff]
+  simp only [psi, phi, theta, Additive.coe_eq_coe, Equiv.toFun_apply]
+  rw [ZMod.two_nat_cast_eq_zero_iff]
   by_cases heven : Even (m n)
-  · rw [pow_even heven]
-    simp [heven]
+  · rw [if_pos heven]
+    rw [pow_even heven, pow_mul, sq]
+    simp [negOneUnit]
   · have hodd : Odd (m n) := Nat.odd_iff_not_even.mpr heven
-    rw [pow_odd hodd]
-    simp [hodd, Nat.odd_iff]
+    rw [if_neg heven, pow_odd hodd, pow_mul, sq]
+    simp [negOneUnit]
 
 end DulaTheorem
